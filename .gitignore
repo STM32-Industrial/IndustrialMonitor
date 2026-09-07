@@ -1,0 +1,18 @@
+# ===== Qt 编译产物 =====
+build/
+Debug/
+Release/
+*.o
+*.obj
+*.exe
+
+# ===== Qt Creator 用户配置（每个人的窗口布局不同，不该备份）=====
+*.pro.user
+
+# ===== 私有配置（含 MQTT 服务器 IP，禁止入库）=====
+mqtt_cfg.h
+
+# ===== 系统 =====
+*.swp
+Thumbs.db
+Desktop.ini
