@@ -271,7 +271,7 @@ QStatusBar {
       <item>
        <widget class="QLabel" name="brokerLabel">
         <property name="text">
-         <string>192.168.0.145:1883</string>
+         <string>127.0.0.1:1883</string>
         </property>
        </widget>
       </item>
