@@ -11,11 +11,13 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    crc32.cpp
 
 HEADERS += \
     mainwindow.h \
-    mqtt_cfg.h
+    mqtt_cfg.h \
+    crc32.h
 
 FORMS += \
     mainwindow.ui

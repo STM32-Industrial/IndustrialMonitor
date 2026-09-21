@@ -7,6 +7,12 @@
 #include <QSqlRecord>
 #include <QVariant>
 #include <QCoreApplication>
+#include <QFile>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QSpinBox>
+
+#include "crc32.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -26,12 +32,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(mqttClient, &QMqttClient::connected, [this]() {
         mqttClient->subscribe(QMqttTopicFilter("sensor/data"), 1);
         mqttClient->subscribe(QMqttTopicFilter("sensor/status"), 1);
+        mqttClient->subscribe(QMqttTopicFilter(OTA_ACK_TOPIC), 1);
         setConnectionState(true);
     });
     connect(mqttClient, &QMqttClient::disconnected, [this]() {
         setConnectionState(false);
     });
     connect(mqttClient, &QMqttClient::messageReceived, this, &MainWindow::onMessageReceived);
+    connect(mqttClient, &QMqttClient::messageReceived, this, &MainWindow::onOtaAckReceived);
 
     mqttClient->setHostname(brokerAddress);
     mqttClient->setPort(brokerPort);
@@ -39,6 +47,16 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(ui->valveBtnOpen, &QPushButton::clicked, this, &MainWindow::onValveOpenClicked);
     connect(ui->valveBtnClose, &QPushButton::clicked, this, &MainWindow::onValveCloseClicked);
+
+    // ---- OTA 控件 ----
+    connect(ui->otaBrowseBtn, &QPushButton::clicked, this, &MainWindow::onOtaBrowseClicked);
+    connect(ui->otaStartBtn, &QPushButton::clicked, this, &MainWindow::onOtaStartClicked);
+    otaTimer = new QTimer(this);
+    otaTimer->setSingleShot(true);
+    connect(otaTimer, &QTimer::timeout, this, &MainWindow::onOtaTimeout);
+    ui->otaStartBtn->setEnabled(false);
+    ui->otaProgress->setValue(0);
+    ui->otaProgressLabel->setText("0%");
 }
 
 MainWindow::~MainWindow()
@@ -393,4 +411,221 @@ void MainWindow::onValveOpenClicked() {
 
 void MainWindow::onValveCloseClicked() {
     mqttClient->publish(QMqttTopicName("sensor/ctrl"), QByteArray("0"));
+}
+
+// ==================== OTA 固件升级 ====================
+
+// 选择固件 .bin 文件, 读取内容并计算 CRC32
+void MainWindow::onOtaBrowseClicked()
+{
+    QString path = QFileDialog::getOpenFileName(
+        this, "选择固件文件", QDir::homePath(),
+        "固件文件 (*.bin);;所有文件 (*)");
+    if (path.isEmpty())
+        return;
+
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, "固件升级", "无法打开文件: " + path);
+        return;
+    }
+    otaFirmware = f.readAll();
+    f.close();
+
+    if (otaFirmware.size() == 0) {
+        QMessageBox::warning(this, "固件升级", "固件文件为空!");
+        otaFirmware.clear();
+        return;
+    }
+
+    otaCrc = crc32(otaFirmware);
+
+    ui->otaFileEdit->setText(path);
+    ui->otaInfoLabel->setText(
+        QString("大小: %1 字节 (%2 KB)   CRC32: %3")
+            .arg(otaFirmware.size())
+            .arg(otaFirmware.size() / 1024.0, 0, 'f', 1)
+            .arg(otaCrc, 8, 16, QLatin1Char('0')));
+    ui->otaStartBtn->setEnabled(true);
+    otaLog(QString("已载入固件: %1 字节, CRC32=%2")
+               .arg(otaFirmware.size())
+               .arg(otaCrc, 8, 16, QLatin1Char('0')));
+}
+
+// 开始升级: 计算分块, 发送 B 开始帧
+void MainWindow::onOtaStartClicked()
+{
+    if (otaFirmware.isEmpty()) {
+        QMessageBox::warning(this, "固件升级", "请先选择固件文件");
+        return;
+    }
+    if (mqttClient->state() != QMqttClient::Connected) {
+        QMessageBox::warning(this, "固件升级", "MQTT 未连接, 无法升级");
+        return;
+    }
+    if (otaFirmware.size() > 496 * 1024) {
+        QMessageBox::warning(this, "固件升级",
+            QString("固件大小 %1 字节超过槽位A容量 496KB!").arg(otaFirmware.size()));
+        return;
+    }
+
+    otaVer = ui->otaVersionSpin->value();
+    otaTotalChunks = (otaFirmware.size() + OTA_CHUNK_SIZE - 1) / OTA_CHUNK_SIZE;
+    otaNextSeq = 0;
+    otaPendingSeq = 0;
+
+    ui->otaStartBtn->setEnabled(false);
+    ui->otaBrowseBtn->setEnabled(false);
+    ui->otaVersionSpin->setEnabled(false);
+    otaSetProgress(0, otaTotalChunks);
+
+    otaLog("===== 开始 OTA 升级 =====");
+    otaLog(QString("版本=%1, 总块数=%2, CRC=%3")
+               .arg(otaVer)
+               .arg(otaTotalChunks)
+               .arg(otaCrc, 8, 16, QLatin1Char('0')));
+
+    otaSendBegin();
+}
+
+// 发送 B 开始帧: B,<size>,<crc32hex>,<version>
+void MainWindow::otaSendBegin()
+{
+    QString payload = QString("B,%1,%2,%3")
+        .arg(otaFirmware.size())
+        .arg(otaCrc, 8, 16, QLatin1Char('0'))
+        .arg(otaVer);
+    otaPublish(payload);
+    otaState = OtaState::WaitBegin;
+    otaLog("已发送开始帧, 等待设备擦除暂存区并确认...");
+    otaTimer->start(OTA_BEGIN_TIMEOUT_MS);
+}
+
+// 发送 D 数据块: D,<seq>,<hex>
+void MainWindow::otaSendChunk(int seq)
+{
+    int offset = seq * OTA_CHUNK_SIZE;
+    int len = qMin(OTA_CHUNK_SIZE, otaFirmware.size() - offset);
+    QByteArray chunk = otaFirmware.mid(offset, len);
+
+    QString payload = QString("D,%1,%2").arg(seq).arg(QString::fromLatin1(chunk.toHex()));
+    otaPublish(payload);
+    otaState = OtaState::Sending;
+    otaPendingSeq = seq;
+    otaTimer->start(OTA_TIMEOUT_MS);
+}
+
+// 发送 E 结束帧
+void MainWindow::otaSendEnd()
+{
+    otaPublish("E");
+    otaState = OtaState::WaitDone;
+    otaLog("已发送结束帧, 等待设备校验结果...");
+    otaTimer->start(OTA_TIMEOUT_MS);
+}
+
+void MainWindow::otaPublish(const QString &payload)
+{
+    mqttClient->publish(QMqttTopicName(OTA_TOPIC), payload.toUtf8());
+}
+
+void MainWindow::otaSetProgress(int done, int total)
+{
+    int pct = total > 0 ? qBound(0, done * 100 / total, 100) : 0;
+    ui->otaProgress->setValue(pct);
+    ui->otaProgressLabel->setText(QString("%1% (%2/%3)").arg(pct).arg(done).arg(total));
+}
+
+void MainWindow::otaLog(const QString &msg)
+{
+    statusBar()->showMessage(msg, 8000);
+    qInfo() << "[OTA]" << msg;
+}
+
+void MainWindow::otaAbort(const QString &reason)
+{
+    otaTimer->stop();
+    otaState = OtaState::Idle;
+    otaPublish("A");   // 通知设备放弃
+    otaLog("升级中止: " + reason);
+    otaResetUi();
+}
+
+void MainWindow::otaResetUi()
+{
+    ui->otaStartBtn->setEnabled(!otaFirmware.isEmpty());
+    ui->otaBrowseBtn->setEnabled(true);
+    ui->otaVersionSpin->setEnabled(true);
+}
+
+// 设备 ACK 处理: R,BEGIN / R,OK,<seq> / R,DONE / R,FAIL,<crc> / R,ERR,.. / R,ABORT
+void MainWindow::onOtaAckReceived(const QByteArray &message, const QMqttTopicName &topic)
+{
+    if (topic.name() != QLatin1String(OTA_ACK_TOPIC))
+        return;
+
+    QString ack = QString::fromUtf8(message).trimmed();
+
+    if (ack.startsWith("R,BEGIN")) {
+        if (otaState == OtaState::WaitBegin) {
+            otaTimer->stop();
+            otaLog("设备已就绪, 开始发送数据块");
+            otaSendChunk(0);
+        }
+    }
+    else if (ack.startsWith("R,OK,")) {
+        bool ok = false;
+        int seq = ack.mid(5).toInt(&ok);
+        if (otaState == OtaState::Sending && ok && seq == otaPendingSeq) {
+            otaTimer->stop();
+            otaSetProgress(seq + 1, otaTotalChunks);
+            otaNextSeq = seq + 1;
+            if (otaNextSeq < otaTotalChunks) {
+                otaSendChunk(otaNextSeq);   // 发送下一块
+            } else {
+                otaLog("数据块发送完毕, 发送结束帧");
+                otaSendEnd();
+            }
+        } else if (otaState == OtaState::Sending && ok && seq < otaPendingSeq) {
+            // 设备对重复块重新确认, 继续等当前块
+            otaTimer->start(OTA_TIMEOUT_MS);
+        }
+    }
+    else if (ack.startsWith("R,DONE")) {
+        if (otaState == OtaState::WaitDone) {
+            otaTimer->stop();
+            otaState = OtaState::Idle;
+            otaSetProgress(otaTotalChunks, otaTotalChunks);
+            otaLog("升级成功! 设备正在重启安装新固件...");
+            QMessageBox::information(this, "固件升级",
+                "升级成功!\n设备已收到全部数据并通过CRC校验,\n正在重启安装新固件。");
+            otaResetUi();
+        }
+    }
+    else if (ack.startsWith("R,FAIL,")) {
+        otaAbort("设备CRC校验失败: " + ack);
+    }
+    else if (ack.startsWith("R,ERR,")) {
+        otaAbort("设备报错: " + ack);
+    }
+    else if (ack.startsWith("R,ABORT")) {
+        otaAbort("设备放弃升级");
+    }
+}
+
+// 超时: 重发当前等待确认的帧
+void MainWindow::onOtaTimeout()
+{
+    if (otaState == OtaState::WaitBegin) {
+        otaLog("等待设备确认超时, 重发开始帧");
+        otaSendBegin();
+    }
+    else if (otaState == OtaState::Sending) {
+        otaLog(QString("块 %1 确认超时, 重发").arg(otaPendingSeq));
+        otaSendChunk(otaPendingSeq);
+    }
+    else if (otaState == OtaState::WaitDone) {
+        otaLog("等待校验结果超时, 重发结束帧");
+        otaSendEnd();
+    }
 }

@@ -187,6 +187,80 @@ QLabel#chartNoteLabel {
 QStatusBar {
     background-color: #0c1116;
     color: #5c6773;
+}
+
+/* ---------- 固件升级 ---------- */
+QFrame#otaCard {
+    background-color: #141b26;
+    border: 1px solid #232d3d;
+    border-radius: 12px;
+    border-left: 3px solid #4fc3f7;
+}
+QLabel#otaFileLabel, QLabel#otaVersionLabel {
+    color: #8b949e;
+    font-size: 13px;
+}
+QLineEdit#otaFileEdit {
+    color: #e6edf3;
+    background-color: #0c1116;
+    border: 1px solid #232d3d;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    font-family: 'Consolas', 'Droid Sans Mono', monospace;
+}
+QPushButton#otaBrowseBtn, QPushButton#otaStartBtn {
+    color: #e6edf3;
+    background-color: #1c2735;
+    border: 1px solid #33415c;
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: 700;
+}
+QPushButton#otaBrowseBtn:hover, QPushButton#otaStartBtn:hover {
+    color: #4fc3f7;
+    background-color: #12291f;
+    border: 1px solid #1f4d38;
+}
+QPushButton#otaStartBtn:disabled {
+    color: #5c6773;
+    background-color: #141b26;
+    border: 1px solid #232d3d;
+}
+QSpinBox#otaVersionSpin {
+    color: #e6edf3;
+    background-color: #0c1116;
+    border: 1px solid #232d3d;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+QLabel#otaInfoLabel {
+    color: #8b949e;
+    font-size: 13px;
+    font-family: 'Consolas', 'Droid Sans Mono', monospace;
+}
+QProgressBar#otaProgress {
+    background-color: #0c1116;
+    border: 1px solid #232d3d;
+    border-radius: 6px;
+    text-align: center;
+    color: #e6edf3;
+    height: 22px;
+}
+QProgressBar#otaProgress::chunk {
+    background-color: #4fc3f7;
+    border-radius: 5px;
+}
+QLabel#otaProgressLabel {
+    color: #8b949e;
+    font-size: 13px;
+    min-width: 44px;
+}
+QLabel#otaNoteLabel {
+    color: #5c6773;
+    font-size: 12px;
 }</string>
   </property>
   <widget class="QWidget" name="centralwidget">
@@ -961,6 +1035,181 @@ QStatusBar {
            </widget>
           </item>
          </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="otaTab">
+       <attribute name="title">
+        <string>固件升级</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="otaLayout">
+        <property name="leftMargin">
+         <number>2</number>
+        </property>
+        <property name="topMargin">
+         <number>14</number>
+        </property>
+        <property name="rightMargin">
+         <number>2</number>
+        </property>
+        <property name="bottomMargin">
+         <number>2</number>
+        </property>
+        <property name="spacing">
+         <number>12</number>
+        </property>
+        <item>
+         <widget class="QFrame" name="otaCard">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>140</height>
+           </size>
+          </property>
+          <layout class="QVBoxLayout" name="otaCardLayout">
+           <property name="leftMargin">
+            <number>22</number>
+           </property>
+           <property name="topMargin">
+            <number>16</number>
+           </property>
+           <property name="rightMargin">
+            <number>22</number>
+           </property>
+           <property name="bottomMargin">
+            <number>16</number>
+           </property>
+           <property name="spacing">
+            <number>10</number>
+           </property>
+           <item>
+            <layout class="QHBoxLayout" name="otaFileRow">
+             <property name="spacing">
+              <number>10</number>
+             </property>
+             <item>
+              <widget class="QLabel" name="otaFileLabel">
+               <property name="text">
+                <string>固件文件:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="otaFileEdit">
+               <property name="placeholderText">
+                <string>选择 .bin 固件文件</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="otaBrowseBtn">
+               <property name="text">
+                <string>选择文件</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="otaVersionLabel">
+               <property name="text">
+                <string>版本号:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QSpinBox" name="otaVersionSpin">
+               <property name="minimum">
+                <number>1</number>
+               </property>
+               <property name="maximum">
+                <number>99999</number>
+               </property>
+               <property name="value">
+                <number>2</number>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="otaInfoRow">
+             <property name="spacing">
+              <number>10</number>
+             </property>
+             <item>
+              <widget class="QLabel" name="otaInfoLabel">
+               <property name="text">
+                <string>未选择固件</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="otaInfoSpacer">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+             <item>
+              <widget class="QPushButton" name="otaStartBtn">
+               <property name="text">
+                <string>开始升级</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="otaProgressRow">
+             <property name="spacing">
+              <number>10</number>
+             </property>
+             <item>
+              <widget class="QProgressBar" name="otaProgress">
+               <property name="maximum">
+                <number>100</number>
+               </property>
+               <property name="value">
+                <number>0</number>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="otaProgressLabel">
+               <property name="text">
+                <string>0%</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="otaNoteLabel">
+          <property name="text">
+           <string>升级流程: 选择固件 → 计算CRC32 → MQTT分块发送 → 设备校验后自动重启安装。升级期间设备会暂停数据上报。</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="otaSpacer">
+          <property name="orientation">
+           <enum>Qt::Vertical</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>20</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
         </item>
        </layout>
       </widget>
